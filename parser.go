@@ -1,11 +1,6 @@
 package jsonparse
 
 import (
-	"bytes"
-	"encoding/json"
-	"io"
-	"io/ioutil"
-	"net/http"
 	"strconv"
 	"strings"
 
@@ -87,24 +82,12 @@ func fetchValue(v interface{}, key string) interface{} {
 	return current
 }
 
-func newReplacerFunc(r *http.Request) (caddy.ReplacerFunc, error) {
-	var v interface{}
-
-	bodyCopy := bytes.Buffer{}
-	tee := io.TeeReader(r.Body, &bodyCopy) // preserve the body
-	err := json.NewDecoder(tee).Decode(&v)
-	if err != nil {
-		return nil, err
-	}
-
-	// replace the body for further handlers
-	r.Body = ioutil.NopCloser(&bodyCopy)
-
+func newReplacerFunc(v interface{}) caddy.ReplacerFunc {
 	// prevent repetitive parsing. cache values
 	values := map[string]interface{}{}
 
 	return func(key string) (interface{}, bool) {
-		prefix := "json."
+		const prefix = "json."
 		if !strings.HasPrefix(key, prefix) {
 			return nil, false
 		}
@@ -119,6 +102,5 @@ func newReplacerFunc(r *http.Request) (caddy.ReplacerFunc, error) {
 		values[key] = val // cache
 
 		return val, true
-
-	}, nil
+	}
 }

@@ -1,0 +1,23 @@
+:8080 {
+  # Apply json_parse before sending to aria2 RPC endpoint
+  handle_path /aria2rpc {
+    json_parse strict {
+      # Transform aria2.addUri params whether or not a secret token is present.
+      # URIs can be at params.0 (no token) or params.1 (with token).
+      transform_array params.0 ^https://pixeldrain\.com/(.*) "$0" "https://pixeldrain.proxy.org/$0"
+      transform_array params.1 ^https://pixeldrain\.com/(.*) "$0" "https://pixeldrain.proxy.org/$0"
+
+      # Add per-server options based on URI patterns.
+      merge_if_match params.0 ^https?://[^/]+\.baidu(?:pcs)?\.com/file/ params.1 {"max-connection-per-server":"2","user-agent":"pan.baidu.com"}
+      merge_if_match params.1 ^https?://[^/]+\.baidu(?:pcs)?\.com/file/ params.2 {"max-connection-per-server":"2","user-agent":"pan.baidu.com"}
+
+      merge_if_match params.0 ^https://[^/]+\.mypikpak\.com/ params.1 {"max-connection-per-server":"2"}
+      merge_if_match params.1 ^https://[^/]+\.mypikpak\.com/ params.2 {"max-connection-per-server":"2"}
+
+      merge_if_match params.0 ^https://pixeldrain\.com/ params.1 {"max-connection-per-server":"1"}
+      merge_if_match params.1 ^https://pixeldrain\.com/ params.2 {"max-connection-per-server":"1"}
+    }
+
+    reverse_proxy http://localhost:6800
+  }
+}
