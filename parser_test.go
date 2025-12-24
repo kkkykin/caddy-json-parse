@@ -42,6 +42,11 @@ func TestFetchers(t *testing.T) {
 			key:      "ref.joe.2.sum.100.dave",
 			expected: "lee",
 		},
+		{json: `[1,2,3]`, key: "-1", expected: nil},
+		{json: `[1,2,3]`, key: "3", expected: nil},
+		{json: `[1,2,3]`, key: "999999999999999999999999999", expected: nil},
+		{json: `{"a":null}`, key: "a.b", expected: nil},
+		{json: `{}`, key: "missing", expected: nil},
 	}
 
 	for i, tt := range tests {
