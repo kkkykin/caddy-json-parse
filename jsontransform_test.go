@@ -170,14 +170,15 @@ func TestJSONTransformCancellation(t *testing.T) {
 }
 
 func TestJSONTransformConcurrentRequests(t *testing.T) {
-	j := &JSONTransform{JQ: `.items |= map(. + 1) | .seen = .id`}
+	j := &JSONTransform{JQ: `.items |= map(. + 1) | .seen = .id | .request = "{test.request}"`}
 	provision(t, j)
 	for i := range 16 {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			t.Parallel()
-			r, _ := newRequest(fmt.Sprintf(`{"id":%d,"items":[1,2,3]}`, i))
+			r, repl := newRequest(fmt.Sprintf(`{"id":%d,"items":[1,2,3]}`, i))
+			repl.Set("test.request", i)
 			err := j.ServeHTTP(httptest.NewRecorder(), r, caddyhttp.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) error {
-				assertJSON(t, readBody(t, r), fmt.Sprintf(`{"id":%d,"seen":%d,"items":[2,3,4]}`, i, i))
+				assertJSON(t, readBody(t, r), fmt.Sprintf(`{"id":%d,"seen":%d,"items":[2,3,4],"request":"%d"}`, i, i, i))
 				return nil
 			}))
 			if err != nil {

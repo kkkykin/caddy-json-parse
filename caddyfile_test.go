@@ -47,6 +47,76 @@ func TestTransformCaddyfile(t *testing.T) {
 	assertJSON(t, string(body), `{"name":"Ada Lovelace","ok":true}`)
 }
 
+func TestTransformCaddyfilePlaceholders(t *testing.T) {
+	const envName = "CADDY_JSON_PARSE_TEST_VALUE"
+	t.Setenv(envName, "from-env")
+	input := `:8080 {
+		json_transform {
+			jq <<JQ
+				.config = "{$CADDY_JSON_PARSE_TEST_VALUE}"
+				| .remote = "{remote_host}"
+				| .runtime_env = "{env.CADDY_JSON_PARSE_TEST_VALUE}"
+			JQ
+		}
+	}`
+	config, warnings, err := caddyconfig.GetAdapter("caddyfile").Adapt(caddyfile.Format([]byte(input)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("Caddyfile warnings: %v", warnings)
+	}
+
+	var adapted any
+	if err := json.Unmarshal(config, &adapted); err != nil {
+		t.Fatal(err)
+	}
+	source, ok := findStringField(adapted, "jq")
+	if !ok {
+		t.Fatalf("adapted config has no jq source: %s", config)
+	}
+	if !strings.Contains(source, `.config = "from-env"`) {
+		t.Fatalf("Caddyfile environment variable was not expanded: %q", source)
+	}
+	if !strings.Contains(source, `{http.request.remote.host}`) {
+		t.Fatalf("remote_host shorthand was not adapted: %q", source)
+	}
+
+	j := &JSONTransform{JQ: source}
+	provision(t, j)
+	r, _ := newRequest(`{}`)
+	r.RemoteAddr = "203.0.113.7:54321"
+	caddyhttp.NewTestReplacer(r)
+	err = j.ServeHTTP(httptest.NewRecorder(), r, caddyhttp.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) error {
+		assertJSON(t, readBody(t, r), `{"config":"from-env","remote":"203.0.113.7","runtime_env":"from-env"}`)
+		return nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func findStringField(value any, key string) (string, bool) {
+	switch value := value.(type) {
+	case map[string]any:
+		if found, ok := value[key].(string); ok {
+			return found, true
+		}
+		for _, child := range value {
+			if found, ok := findStringField(child, key); ok {
+				return found, true
+			}
+		}
+	case []any:
+		for _, child := range value {
+			if found, ok := findStringField(child, key); ok {
+				return found, true
+			}
+		}
+	}
+	return "", false
+}
+
 func TestRejectInvalidTransformConfig(t *testing.T) {
 	for _, config := range []string{
 		"json_transform",
@@ -106,6 +176,27 @@ func TestJQFileIsCompiledAtProvision(t *testing.T) {
 		if err := config.Provision(caddy.Context{}); err == nil {
 			t.Errorf("accepted invalid jq_file: %q", source)
 		}
+	}
+}
+
+func TestJQFileKeepsPlaceholderStrings(t *testing.T) {
+	t.Setenv("CADDY_JSON_PARSE_TEST_VALUE", "from-env")
+	source := `{"config":"{$CADDY_JSON_PARSE_TEST_VALUE}","env":"{env.CADDY_JSON_PARSE_TEST_VALUE}","remote":"{http.request.remote.host}"}`
+	path := filepath.Join(t.TempDir(), "query.jq")
+	if err := os.WriteFile(path, []byte(source), 0600); err != nil {
+		t.Fatal(err)
+	}
+	j := &JSONTransform{JQFile: path}
+	provision(t, j)
+	r, _ := newRequest(`{}`)
+	r.RemoteAddr = "203.0.113.7:54321"
+	caddyhttp.NewTestReplacer(r)
+	err := j.ServeHTTP(httptest.NewRecorder(), r, caddyhttp.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) error {
+		assertJSON(t, readBody(t, r), source)
+		return nil
+	}))
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

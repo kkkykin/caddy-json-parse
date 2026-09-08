@@ -80,6 +80,33 @@ route {
 }
 ```
 
+Inline `jq` programs support Caddy placeholders inside jq strings, including
+heredocs and backtick arguments:
+
+```caddyfile
+json_transform {
+    jq <<JQ
+        .remote = "{remote_host}"
+        | .proxy = "{env.SITEPROXY}"
+    JQ
+}
+```
+
+These values are resolved for each request and passed to the compiled program
+as strings. Quotes, backslashes, and newlines in placeholder values remain data.
+Use jq conversions such as `("{env.LIMIT}" | tonumber)` when a number is needed.
+With JSON configuration, use full placeholder names such as
+`{http.request.remote.host}` instead of Caddyfile shorthands.
+
+Only string literals in the program are expanded; strings read from the request
+body are left as data. Unrecognized placeholders and regex quantifiers such as
+`{2,4}` are preserved, while unset `{env.NAME}` values become empty strings.
+Write `"\\{env.NAME\\}"` in jq to keep `{env.NAME}` literal.
+
+Caddyfile `{$NAME}` environment substitutions still happen when the configuration
+is loaded. External `jq_file` contents do not expand Caddy placeholders or
+Caddyfile environment substitutions.
+
 Use jq's conditionals, object updates, array operations, and variable bindings
 to express the whole transformation. For example:
 
@@ -106,9 +133,11 @@ arithmetic and mathematical functions follow gojq's floating-point semantics.
 Non-finite results cannot be encoded as JSON and are rejected.
 
 Both handlers share the parsed document within a request. Add `json_parse` when
-placeholders are needed; they reflect the latest successful transform, even if
-`json_parse` ran first. By default, Caddy orders `json_transform`, then
+`{json.*}` placeholders are needed; they reflect the latest successful transform,
+even if `json_parse` ran first. By default, Caddy orders `json_transform`, then
 `json_parse`, then `reverse_proxy`. Use a `route` block for explicit ordering.
+To read `{json.*}` placeholders inside jq strings, run `json_parse` before
+`json_transform` in that block.
 
 ### Limits and errors
 
@@ -118,8 +147,10 @@ for `json_transform`, the encoded result. Caddyfile values accept sizes such as
 limit, including when it reuses an already parsed document.
 
 `timeout` defaults to **1s** and bounds jq evaluation. Request cancellation also
-stops evaluation. Programs receive the request JSON; module imports, extra input
-streams, and access to the process environment are not enabled.
+stops evaluation. Programs receive the request JSON and any resolved inline
+placeholders. Module imports and extra input streams are not enabled. jq's `env`
+and `$ENV` do not inherit the process environment; use explicit `{env.NAME}`
+placeholders in inline jq strings to read environment variables.
 
 | Failure | Result |
 | --- | --- |

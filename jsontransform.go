@@ -25,7 +25,8 @@ type JSONTransform struct {
 	MaxSize int64          `json:"max_size,omitempty"`
 	Timeout caddy.Duration `json:"timeout,omitempty"`
 
-	code *gojq.Code
+	code                 *gojq.Code
+	placeholderTemplates []string
 }
 
 func (JSONTransform) CaddyModule() caddy.ModuleInfo {
@@ -57,11 +58,12 @@ func (j *JSONTransform) Provision(_ caddy.Context) error {
 		}
 		source = string(body)
 	}
-	code, err := compileProgram(source)
+	code, templates, err := compileProgram(source, j.JQFile == "")
 	if err != nil {
 		return err
 	}
 	j.code = code
+	j.placeholderTemplates = templates
 	return nil
 }
 
@@ -79,7 +81,18 @@ func (j JSONTransform) ServeHTTP(w http.ResponseWriter, r *http.Request, next ca
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(j.Timeout))
 	defer cancel()
-	result, err := runProgram(ctx, j.code, doc.value)
+	var values []any
+	if len(j.placeholderTemplates) > 0 {
+		repl, _ := r.Context().Value(caddy.ReplacerCtxKey).(*caddy.Replacer)
+		if repl == nil {
+			repl = caddy.NewReplacer()
+		}
+		values = make([]any, len(j.placeholderTemplates))
+		for i, template := range j.placeholderTemplates {
+			values[i] = repl.ReplaceKnown(template, "")
+		}
+	}
+	result, err := runProgram(ctx, j.code, doc.value, values...)
 	if err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, context.DeadlineExceeded) {
